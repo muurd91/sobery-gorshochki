@@ -285,32 +285,30 @@
     C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88,
     C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00
   };
-  // A cheerful, bouncy little loop (8s: an opening phrase answered by a
-  // second, contrasting one that resolves back to the start) - light
-  // enough to sit under the sound effects rather than compete with them.
+  // One continuous 8s phrase (not two loops stitched together): it opens
+  // with a motif, sequences it a step higher without fully resolving
+  // midway (so it keeps moving forward instead of sounding like it
+  // "restarts"), then descends through a single unbroken line to land
+  // back on the tonic exactly at the loop point.
   var MUSIC_LEAD = [
-    // phrase A
     ['C5', 0.25], ['E5', 0.25], ['G5', 0.25], ['E5', 0.25],
     ['F5', 0.25], ['A5', 0.25], ['G5', 0.25], ['E5', 0.25],
     ['D5', 0.25], ['F5', 0.25], ['A5', 0.25], ['F5', 0.25],
-    ['G5', 0.25], ['E5', 0.25], ['D5', 0.25], ['C5', 0.25],
-    // phrase B - answers, dips lower, resolves back to C5 for the loop
-    ['G5', 0.25], ['F5', 0.25], ['E5', 0.25], ['D5', 0.25],
-    ['E5', 0.25], ['G5', 0.25], ['F5', 0.25], ['E5', 0.25],
-    ['D5', 0.25], ['C5', 0.25], ['D5', 0.25], ['E5', 0.25],
-    ['D5', 0.25], ['C5', 0.25], ['B4', 0.25], ['C5', 0.25]
+    ['G5', 0.25], ['B4', 0.25], ['A5', 0.25], ['F5', 0.25],
+    ['E5', 0.25], ['G5', 0.25], ['F5', 0.25], ['D5', 0.25],
+    ['C5', 0.25], ['E5', 0.25], ['D5', 0.25], ['B4', 0.25],
+    ['C5', 0.25], ['D5', 0.25], ['E5', 0.25], ['D5', 0.25],
+    ['C5', 0.25], ['D5', 0.25], ['B4', 0.25], ['C5', 0.25]
   ];
   var MUSIC_BASS = [
-    // under phrase A
-    ['C3', 0.5], ['G3', 0.5],
-    ['A3', 0.5], ['E3', 0.5],
-    ['F3', 0.5], ['C3', 0.5],
-    ['G3', 0.5], ['G3', 0.5],
-    // under phrase B
-    ['F3', 0.5], ['C3', 0.5],
+    ['C3', 0.5], ['A3', 0.5],
+    ['F3', 0.5], ['G3', 0.5],
+    ['C3', 0.5], ['A3', 0.5],
+    ['F3', 0.5], ['G3', 0.5],
+    ['E3', 0.5], ['F3', 0.5],
     ['D3', 0.5], ['G3', 0.5],
-    ['E3', 0.5], ['A3', 0.5],
-    ['F3', 0.5], ['G3', 0.5]
+    ['C3', 0.5], ['F3', 0.5],
+    ['G3', 0.5], ['C3', 0.5]
   ];
   var musicEnabled = false, musicTimerId = null;
   var musicLeadIdx = 0, musicLeadNext = 0;
