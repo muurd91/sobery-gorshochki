@@ -285,19 +285,32 @@
     C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88,
     C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00
   };
-  // A cheerful, bouncy little loop (4s) - light enough to sit under the
-  // sound effects rather than compete with them.
+  // A cheerful, bouncy little loop (8s: an opening phrase answered by a
+  // second, contrasting one that resolves back to the start) - light
+  // enough to sit under the sound effects rather than compete with them.
   var MUSIC_LEAD = [
+    // phrase A
     ['C5', 0.25], ['E5', 0.25], ['G5', 0.25], ['E5', 0.25],
     ['F5', 0.25], ['A5', 0.25], ['G5', 0.25], ['E5', 0.25],
     ['D5', 0.25], ['F5', 0.25], ['A5', 0.25], ['F5', 0.25],
-    ['G5', 0.25], ['E5', 0.25], ['D5', 0.25], ['C5', 0.25]
+    ['G5', 0.25], ['E5', 0.25], ['D5', 0.25], ['C5', 0.25],
+    // phrase B - answers, dips lower, resolves back to C5 for the loop
+    ['G5', 0.25], ['F5', 0.25], ['E5', 0.25], ['D5', 0.25],
+    ['E5', 0.25], ['G5', 0.25], ['F5', 0.25], ['E5', 0.25],
+    ['D5', 0.25], ['C5', 0.25], ['D5', 0.25], ['E5', 0.25],
+    ['D5', 0.25], ['C5', 0.25], ['B4', 0.25], ['C5', 0.25]
   ];
   var MUSIC_BASS = [
+    // under phrase A
     ['C3', 0.5], ['G3', 0.5],
     ['A3', 0.5], ['E3', 0.5],
     ['F3', 0.5], ['C3', 0.5],
-    ['G3', 0.5], ['G3', 0.5]
+    ['G3', 0.5], ['G3', 0.5],
+    // under phrase B
+    ['F3', 0.5], ['C3', 0.5],
+    ['D3', 0.5], ['G3', 0.5],
+    ['E3', 0.5], ['A3', 0.5],
+    ['F3', 0.5], ['G3', 0.5]
   ];
   var musicEnabled = false, musicTimerId = null;
   var musicLeadIdx = 0, musicLeadNext = 0;
@@ -322,13 +335,13 @@
     var horizon = ac.currentTime + 0.6;
     while (musicLeadNext < horizon) {
       var n = MUSIC_LEAD[musicLeadIdx % MUSIC_LEAD.length];
-      scheduleTone(NOTE_FREQ[n[0]], musicLeadNext, n[1], 'square', 0.045);
+      scheduleTone(NOTE_FREQ[n[0]], musicLeadNext, n[1], 'square', 0.028);
       musicLeadNext += n[1];
       musicLeadIdx++;
     }
     while (musicBassNext < horizon) {
       var b = MUSIC_BASS[musicBassIdx % MUSIC_BASS.length];
-      scheduleTone(NOTE_FREQ[b[0]], musicBassNext, b[1], 'triangle', 0.04);
+      scheduleTone(NOTE_FREQ[b[0]], musicBassNext, b[1], 'triangle', 0.025);
       musicBassNext += b[1];
       musicBassIdx++;
     }
