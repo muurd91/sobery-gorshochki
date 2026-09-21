@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Сортировщик горшочков</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #0b0b0d;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Courier New', Consolas, monospace;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: none;
+  }
+  .tv-frame {
+    transform-origin: center center;
+  }
+  .tv-frame {
+    position: relative;
+    padding: 26px 26px 40px 26px;
+    border-radius: 34px;
+    background: linear-gradient(160deg, #4a4a4e 0%, #2b2b2e 45%, #17171a 100%);
+    box-shadow:
+      0 0 0 3px #000,
+      0 25px 50px rgba(0,0,0,.7),
+      inset 0 2px 3px rgba(255,255,255,.15),
+      inset 0 -6px 14px rgba(0,0,0,.6);
+  }
+  .tv-frame::before {
+    content: "";
+    position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+    width: 70px; height: 8px; border-radius: 4px;
+    background: linear-gradient(#111,#000);
+    box-shadow: inset 0 1px 1px rgba(255,255,255,.2);
+  }
+  .screen-wrap {
+    position: relative;
+    width: 900px; height: 600px;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #000;
+    box-shadow: inset 0 0 40px rgba(0,0,0,.95), inset 0 0 4px #000;
+  }
+  canvas {
+    position: absolute; top: 0; left: 0;
+    width: 900px; height: 600px;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  .fx-layer {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .scanlines {
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 1px,
+      rgba(0,0,0,.16) 2px,
+      rgba(0,0,0,.16) 3px
+    );
+  }
+  .vignette {
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%);
+  }
+  .glass-shine {
+    background: linear-gradient(115deg, rgba(255,255,255,.08) 0%, rgba(255,255,255,0) 22%);
+  }
+
+  /* Touch controls - only shown on touchscreens (mouse/trackpad users get
+     the plain keyboard-driven view). Fixed to the viewport rather than
+     scaled with the TV frame, so buttons stay a consistent, thumb-friendly
+     size regardless of how small the frame gets. */
+  .touch-controls {
+    display: none;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  @media (pointer: coarse) {
+    .touch-controls { display: block; }
+  }
+  .dpad {
+    position: fixed;
+    left: max(16px, env(safe-area-inset-left));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    width: 168px; height: 168px;
+  }
+  .dpad button {
+    position: absolute;
+    width: 56px; height: 56px;
+    border-radius: 14px;
+    border: 2px solid rgba(255,255,255,.4);
+    background: rgba(20,20,24,.55);
+    color: #ffe082;
+    font-size: 22px;
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .dpad button:active { background: rgba(255,224,130,.4); }
+  .dpad .up    { left: 56px; top: 0; }
+  .dpad .down  { left: 56px; top: 112px; }
+  .dpad .left  { left: 0;    top: 56px; }
+  .dpad .right { left: 112px; top: 56px; }
+
+  .catch-btn {
+    position: fixed;
+    right: max(20px, env(safe-area-inset-right));
+    bottom: max(24px, env(safe-area-inset-bottom));
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    border: 3px solid rgba(255,255,255,.45);
+    background: rgba(200,40,40,.55);
+    color: #fff;
+    font-weight: bold;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.25;
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .catch-btn:active { background: rgba(255,70,70,.8); }
+</style>
+</head>
+<body>
+  <div class="tv-frame">
+    <div class="screen-wrap">
+      <canvas id="game" width="900" height="600"></canvas>
+      <div class="fx-layer vignette"></div>
+      <div class="fx-layer scanlines"></div>
+      <div class="fx-layer glass-shine"></div>
+    </div>
+  </div>
+
+  <div class="touch-controls">
+    <div class="dpad">
+      <button type="button" class="up" data-key="up">&#9650;</button>
+      <button type="button" class="down" data-key="down">&#9660;</button>
+      <button type="button" class="left" data-key="left">&#9664;</button>
+      <button type="button" class="right" data-key="right">&#9654;</button>
+    </div>
+    <button type="button" class="catch-btn" id="catchBtn">ЛОВИ<br>БРАК</button>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  var canvas = document.getElementById('game');
+  var ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+
+  // ---------- responsive scaling ----------
+  // The frame is a fixed 952x666 (900x600 screen + bezel); on small/mobile
+  // viewports it's scaled down with a CSS transform so the canvas itself
+  // stays crisp pixel-art at its native resolution.
+  var tvFrame = document.querySelector('.tv-frame');
+  function fitToScreen() {
+    var margin = 12;
+    var frameW = 952, frameH = 666;
+    var scale = Math.min(
+      (window.innerWidth - margin * 2) / frameW,
+      (window.innerHeight - margin * 2) / frameH,
+      1
+    );
+    tvFrame.style.transform = 'scale(' + Math.max(0.2, scale) + ')';
+  }
+  fitToScreen();
+  window.addEventListener('resize', fitToScreen);
+  window.addEventListener('orientationchange', fitToScreen);
+
+  // ---------- assets ----------
+  // The hero frames were pre-cut into real transparent PNGs offline (the
+  // source sheet had no alpha channel - just a baked-in checkerboard - and
+  // browsers refuse getImageData on images loaded from file:// origins, so
+  // that keying-out has to happen before the page runs, not inside it).
+  var bgImg = new Image();
+  var idleImgs = [new Image(), new Image()];
+  var walkImgs = [new Image(), new Image(), new Image(), new Image()];
+  var backImg = new Image();
+  var partImg = new Image();
+
+  var allImages = [bgImg, idleImgs[0], idleImgs[1], walkImgs[0], walkImgs[1], walkImgs[2], walkImgs[3], backImg, partImg];
+  var assetsLoaded = 0;
+  var assetsFailed = false;
+  allImages.forEach(function (img) {
+    img.onload = function () { assetsLoaded++; };
+    img.onerror = function () { assetsFailed = true; };
+  });
+  bgImg.src = 'Sprites/Основа.png';
+  idleImgs[0].src = 'Sprites/cut/hero_idle0.png';
+  idleImgs[1].src = 'Sprites/cut/hero_idle1.png';
+  walkImgs[0].src = 'Sprites/cut/hero_walk0.png';
+  walkImgs[1].src = 'Sprites/cut/hero_walk1.png';
+  walkImgs[2].src = 'Sprites/cut/hero_walk2.png';
+  walkImgs[3].src = 'Sprites/cut/hero_walk3.png';
+  backImg.src = 'Sprites/cut/hero_back.png';
+  partImg.src = 'Sprites/cut/part.png';
+
+  var TOTAL_ASSETS = allImages.length;
+
+  // pre-tinted "bad" (red) part sprite - built with compositing only
+  // (drawImage + globalCompositeOperation never touches pixel data, so it
+  // stays safe under the file:// canvas-taint restriction).
+  var partBadCanvas = null, partLifeCanvas = null;
+  function tintPart(color) {
+    var c = document.createElement('canvas');
+    c.width = partImg.naturalWidth; c.height = partImg.naturalHeight;
+    var tctx = c.getContext('2d');
+    tctx.drawImage(partImg, 0, 0);
+    tctx.globalCompositeOperation = 'source-atop';
+    tctx.fillStyle = color;
+    tctx.fillRect(0, 0, c.width, c.height);
+    tctx.globalCompositeOperation = 'source-over';
+    return c;
+  }
+  function buildTintedSprites() {
+    partBadCanvas = tintPart('rgba(230,30,30,0.65)');
+    partLifeCanvas = tintPart('rgba(40,220,90,0.62)');
+  }
+
+  // ---------- audio (synthesized, no external files) ----------
+  var actx = null;
+  function audio() {
+    if (!actx) {
+      try { actx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch (e) { actx = false; }
+    }
+    return actx;
+  }
+  function beep(freq, dur, type, vol, delay) {
+    var ac = audio();
+    if (!ac) return;
+    var t0 = ac.currentTime + (delay || 0);
+    var osc = ac.createOscillator();
+    var gain = ac.createGain();
+    osc.type = type || 'square';
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol || 0.15, t0 + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + dur);
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  }
+  function sfxGood()   { beep(760, 0.09, 'square', 0.12); beep(1020, 0.08, 'square', 0.10, 0.06); }
+  function sfxBad()    { beep(300, 0.10, 'sawtooth', 0.12); beep(500, 0.10, 'sawtooth', 0.10, 0.05); }
+  function sfxLife()   { beep(180, 0.22, 'sawtooth', 0.16); beep(120, 0.25, 'sawtooth', 0.14, 0.08); }
+  function sfxOver()   { beep(400, 0.15, 'triangle', 0.15); beep(320, 0.15, 'triangle', 0.14, 0.15); beep(220, 0.30, 'triangle', 0.14, 0.30); }
+  function sfxStart()  { beep(500, 0.08, 'square', 0.12); beep(700, 0.08, 'square', 0.12, 0.08); beep(900, 0.12, 'square', 0.12, 0.16); }
+  function sfxLifeUp() { beep(520, 0.09, 'triangle', 0.14); beep(660, 0.09, 'triangle', 0.14, 0.08); beep(880, 0.14, 'triangle', 0.16, 0.16); }
+  function sfxLevelUp(){ beep(440, 0.12, 'square', 0.13); beep(660, 0.12, 'square', 0.13, 0.10); beep(880, 0.20, 'square', 0.15, 0.20); }
+
+  // ---------- constants ----------
+  var W = 900, H = 600;
+
+  // Traced from the reference images the player provided ("Зона для
+  // персонажа" / "Зона проезда горшков"), corners detected by color and
+  // scaled from the 1536x1024 source art down to the 900x600 canvas
+  // (scale = 900/1536 = 0.5859375).
+  var PLAYER_ZONE = [
+    { x: 496, y: 507 },
+    { x: 728, y: 468 },
+    { x: 751, y: 504 },
+    { x: 530, y: 575 }
+  ];
+
+  // Conveyor belt quad corners: A/B = near the machine (spawn edge),
+  // D/C = near the player (catch edge). A pairs with D (left rail),
+  // B pairs with C (right rail).
+  var BELT_A = { x: 369, y: 132 };
+  var BELT_B = { x: 456, y: 116 };
+  var BELT_C = { x: 684, y: 398 };
+  var BELT_D = { x: 497, y: 444 };
+
+  function lerpPt(p1, p2, t) {
+    return { x: p1.x + (p2.x - p1.x) * t, y: p1.y + (p2.y - p1.y) * t };
+  }
+  var LANE_S = [0, 0.5, 1];
+  var SPAWN_SLOTS = LANE_S.map(function (s) { return lerpPt(BELT_A, BELT_B, s); });
+  var END_POINTS = LANE_S.map(function (s) { return lerpPt(BELT_D, BELT_C, s); });
+
+  function pointInPolygon(x, y, poly) {
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+      var intersect = ((yi > y) !== (yj > y)) &&
+        (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+  function polygonCenter(poly) {
+    var sx = 0, sy = 0;
+    for (var i = 0; i < poly.length; i++) { sx += poly[i].x; sy += poly[i].y; }
+    return { x: sx / poly.length, y: sy / poly.length };
+  }
+
+  // Closest point on a convex polygon's boundary - used to let the player
+  // slide along the zone's edge (instead of just stopping) whenever a raw
+  // move would step outside it.
+  function closestPointOnSegment(px, py, ax, ay, bx, by) {
+    var abx = bx - ax, aby = by - ay;
+    var lenSq = abx * abx + aby * aby;
+    var t = lenSq > 0 ? ((px - ax) * abx + (py - ay) * aby) / lenSq : 0;
+    t = Math.max(0, Math.min(1, t));
+    return { x: ax + abx * t, y: ay + aby * t };
+  }
+  function closestPointOnPolygon(px, py, poly) {
+    var best = null, bestDist = Infinity;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      var cp = closestPointOnSegment(px, py, poly[j].x, poly[j].y, poly[i].x, poly[i].y);
+      var dx = px - cp.x, dy = py - cp.y;
+      var d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = cp; }
+    }
+    return best;
+  }
+
+  var PLAYER_W = 100, PLAYER_H = 172, PLAYER_SPEED = 230;
+  var PART_W = 63, PART_H = 56;
+  var MAX_LIVES = 3;
+
+  var GOOD_SCORE = 10, BAD_SCORE = 15, LIFE_SCORE_NORMAL = 20, LIFE_SCORE_FULL = 50;
+
+  // Three levels ("shift" = a full work day). Each spawns pots faster and
+  // with more defects than the last; a bonus (green) pot gets a little
+  // rarer as things get busier.
+  var LEVELS = [
+    { label: 'УРОВЕНЬ 1', duration: 35, spawnInterval: 1.5,  badChance: 0.20, lifeChance: 0.07, travel: 2.6 },
+    { label: 'УРОВЕНЬ 2', duration: 40, spawnInterval: 1.15, badChance: 0.30, lifeChance: 0.06, travel: 2.15 },
+    { label: 'УРОВЕНЬ 3', duration: 45, spawnInterval: 0.9,  badChance: 0.38, lifeChance: 0.05, travel: 1.8 }
+  ];
+
+  // ---------- state ----------
+  var STATE_START = 'start', STATE_PLAY = 'play', STATE_LEVELUP = 'levelup', STATE_OVER = 'over';
+  var state = STATE_START;
+
+  var score = 0, lives = 3, elapsed = 0;
+  var level = 0, levelTimer = LEVELS[0].duration, levelBannerTimer = 0;
+  var gameOverReason = 'lives', finalPercent = 0, finalMaxScore = 0;
+  // Counts of pots actually spawned this run, by kind - the "perfect play"
+  // ceiling is computed from these at the end, so it reflects exactly what
+  // this particular run offered (which varies run to run with the RNG),
+  // not a fixed theoretical average.
+  var spawnedCounts = { good: 0, bad: 0, life: 0 };
+  var highScore = 0;
+  try { highScore = parseInt(localStorage.getItem('gorshochki_highscore') || '0', 10) || 0; } catch (e) {}
+
+  var playerStart = polygonCenter(PLAYER_ZONE);
+  var player = {
+    x: playerStart.x,
+    y: playerStart.y,
+    facing: 'down',
+    animTimer: 0,
+    walkFrame: 0,
+    idleFrame: 0,
+    idleTimer: 0,
+    flashTimer: 0
+  };
+
+  var pots = [];
+  var particles = [];
+  var floaters = [];
+  var spawnTimer = 0;
+  var screenShake = 0;
+  var screenFlash = 0;
+
+  var keys = {};
+  var spaceEdge = false;
+
+  window.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight' || k === ' ' || k === 'Spacebar' || k === 'Enter') {
+      e.preventDefault();
+    }
+    if (k === ' ' || k === 'Spacebar') {
+      if (!keys.space) spaceEdge = true;
+      keys.space = true;
+    }
+    if (k === 'ArrowUp') keys.up = true;
+    if (k === 'ArrowDown') keys.down = true;
+    if (k === 'ArrowLeft') keys.left = true;
+    if (k === 'ArrowRight') keys.right = true;
+
+    if (k === 'Enter' || k === ' ' || k === 'Spacebar') {
+      if (state === STATE_START) { startGame(); }
+      else if (state === STATE_OVER) { startGame(); }
+    }
+  }, { passive: false });
+
+  window.addEventListener('keyup', function (e) {
+    var k = e.key;
+    if (k === ' ' || k === 'Spacebar') keys.space = false;
+    if (k === 'ArrowUp') keys.up = false;
+    if (k === 'ArrowDown') keys.down = false;
+    if (k === 'ArrowLeft') keys.left = false;
+    if (k === 'ArrowRight') keys.right = false;
+  }, { passive: false });
+
+  // ---------- touch controls (mobile) ----------
+  function bindHold(el, onDown, onUp) {
+    el.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      onDown();
+    }, { passive: false });
+    el.addEventListener('pointerup', function (e) { e.preventDefault(); onUp(); }, { passive: false });
+    el.addEventListener('pointercancel', function () { onUp(); }, { passive: false });
+    el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+  }
+  var dpadButtons = document.querySelectorAll('.dpad button');
+  for (var dbi = 0; dbi < dpadButtons.length; dbi++) {
+    (function (btn) {
+      var key = btn.getAttribute('data-key');
+      bindHold(btn, function () { keys[key] = true; }, function () { keys[key] = false; });
+    })(dpadButtons[dbi]);
+  }
+  var catchBtn = document.getElementById('catchBtn');
+  bindHold(catchBtn, function () {
+    if (!keys.space) spaceEdge = true;
+    keys.space = true;
+    if (state === STATE_START || state === STATE_OVER) startGame();
+  }, function () { keys.space = false; });
+
+  function startGame() {
+    score = 0; lives = MAX_LIVES; elapsed = 0;
+    level = 0; levelTimer = LEVELS[0].duration; levelBannerTimer = 0;
+    spawnedCounts = { good: 0, bad: 0, life: 0 };
+    pots = []; particles = []; floaters = [];
+    spawnTimer = 0.6;
+    player.x = playerStart.x;
+    player.y = playerStart.y;
+    player.facing = 'down';
+    state = STATE_PLAY;
+    sfxStart();
+  }
+
+  function gameOver(reason) {
+    state = STATE_OVER;
+    gameOverReason = reason;
+    // "Perfect play" ceiling for exactly the pots this run actually spawned.
+    finalMaxScore = spawnedCounts.good * GOOD_SCORE
+                  + spawnedCounts.bad * BAD_SCORE
+                  + spawnedCounts.life * LIFE_SCORE_FULL;
+    finalPercent = finalMaxScore > 0 ? Math.round((score / finalMaxScore) * 100) : 100;
+    if (score > highScore) {
+      highScore = score;
+      try { localStorage.setItem('gorshochki_highscore', String(highScore)); } catch (e) {}
+    }
+    sfxOver();
+  }
+
+  // ---------- spawning ----------
+  function spawnPot() {
+    var lv = LEVELS[level];
+    var slotIdx = Math.floor(Math.random() * 3);
+    var roll = Math.random();
+    var kind = 'good';
+    if (roll < lv.lifeChance) kind = 'life';
+    else if (roll < lv.lifeChance + lv.badChance) kind = 'bad';
+    spawnedCounts[kind]++;
+    pots.push({
+      slot: slotIdx,
+      sx: SPAWN_SLOTS[slotIdx].x, sy: SPAWN_SLOTS[slotIdx].y,
+      ex: END_POINTS[slotIdx].x, ey: END_POINTS[slotIdx].y,
+      t: 0, duration: lv.travel,
+      kind: kind, caught: false, dead: false
+    });
+  }
+
+  // ---------- helpers ----------
+  function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+
+  function addBurst(x, y, color) {
+    for (var i = 0; i < 10; i++) {
+      var ang = Math.random() * Math.PI * 2;
+      var spd = 60 + Math.random() * 90;
+      particles.push({
+        x: x, y: y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        life: 0.45 + Math.random() * 0.25, age: 0,
+        size: 3 + Math.random() * 3, color: color
+      });
+    }
+  }
+
+  function addFloater(x, y, text, color) {
+    floaters.push({ x: x, y: y, text: text, color: color, age: 0, life: 0.9 });
+  }
+
+  // ---------- update ----------
+  var lastTime = null;
+  function frame(ts) {
+    if (lastTime === null) lastTime = ts;
+    var dt = Math.min(0.05, (ts - lastTime) / 1000);
+    lastTime = ts;
+
+    if (assetsLoaded >= TOTAL_ASSETS && !partBadCanvas && !assetsFailed) buildTintedSprites();
+
+    if (state === STATE_PLAY && assetsLoaded >= TOTAL_ASSETS) update(dt);
+    else if (state === STATE_LEVELUP) {
+      levelBannerTimer -= dt;
+      if (levelBannerTimer <= 0) state = STATE_PLAY;
+    }
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  function update(dt) {
+    elapsed += dt;
+
+    // level timer
+    levelTimer -= dt;
+    if (levelTimer <= 0) {
+      if (level < LEVELS.length - 1) {
+        level++;
+        levelTimer = LEVELS[level].duration;
+        levelBannerTimer = 2.2;
+        pots = [];
+        spawnTimer = 0.8;
+        state = STATE_LEVELUP;
+        sfxLevelUp();
+        return;
+      } else {
+        gameOver('completed');
+        return;
+      }
+    }
+
+    // movement
+    var dx = 0, dy = 0;
+    if (keys.left) dx -= 1;
+    if (keys.right) dx += 1;
+    if (keys.up) dy -= 1;
+    if (keys.down) dy += 1;
+
+    if (dx !== 0 || dy !== 0) {
+      var len = Math.sqrt(dx * dx + dy * dy);
+      dx /= len; dy /= len;
+      var stepX = dx * PLAYER_SPEED * dt;
+      var stepY = dy * PLAYER_SPEED * dt;
+
+      // Feet position must stay inside the traced player-zone polygon. If
+      // the raw move would leave it, snap to the nearest point still on the
+      // boundary instead of just stopping - pressing into an edge then
+      // slides the feet along that edge's own direction.
+      var tryX = player.x + stepX, tryY = player.y + stepY;
+      if (pointInPolygon(tryX, tryY, PLAYER_ZONE)) {
+        player.x = tryX; player.y = tryY;
+      } else {
+        var cp = closestPointOnPolygon(tryX, tryY, PLAYER_ZONE);
+        player.x = cp.x; player.y = cp.y;
+      }
+
+      player.animTimer += dt;
+      if (player.animTimer > 0.09) {
+        player.animTimer = 0;
+        player.walkFrame = (player.walkFrame + 1) % 4;
+      }
+      if (dy < -0.3) player.facing = 'up';
+      else if (dx < -0.2) player.facing = 'left';
+      else if (dx > 0.2) player.facing = 'right';
+      else player.facing = 'down';
+    } else {
+      player.idleTimer += dt;
+      if (player.idleTimer > 0.5) {
+        player.idleTimer = 0;
+        player.idleFrame = (player.idleFrame + 1) % 2;
+      }
+      if (player.facing === 'up') { /* keep facing up when stopped */ }
+      else player.facing = 'down';
+    }
+
+    // player hitbox (feet-anchored; sized relative to the enlarged sprite)
+    var hbW = 96, hbH = 102;
+    var hbX = player.x - hbW / 2;
+    var hbY = player.y - 142;
+
+    // spawn
+    spawnTimer -= dt;
+    if (spawnTimer <= 0) {
+      spawnPot();
+      var lvNow = LEVELS[level];
+      spawnTimer = lvNow.spawnInterval * (0.85 + Math.random() * 0.3);
+    }
+
+    // pots
+    for (var i = pots.length - 1; i >= 0; i--) {
+      var p = pots[i];
+      if (p.dead) { pots.splice(i, 1); continue; }
+      p.t += dt / p.duration;
+      var tt = Math.min(1, p.t);
+      p.x = p.sx + (p.ex - p.sx) * tt;
+      p.y = p.sy + (p.ey - p.sy) * tt;
+
+      if (!p.caught) {
+        var overlap = rectsOverlap(hbX, hbY, hbW, hbH, p.x - PART_W / 2, p.y - PART_H / 2, PART_W, PART_H);
+        if (overlap && p.kind === 'good') {
+          p.caught = true; p.dead = true;
+          score += GOOD_SCORE;
+          addBurst(p.x, p.y, '#ffd85e');
+          addFloater(p.x, p.y - 10, '+' + GOOD_SCORE, '#ffd85e');
+          sfxGood();
+        } else if (overlap && p.kind === 'bad' && spaceEdge) {
+          p.caught = true; p.dead = true;
+          score += BAD_SCORE;
+          addBurst(p.x, p.y, '#7CFC6E');
+          addFloater(p.x, p.y - 10, '+' + BAD_SCORE + ' БРАК!', '#7CFC6E');
+          sfxBad();
+        } else if (overlap && p.kind === 'life') {
+          p.caught = true; p.dead = true;
+          if (lives < MAX_LIVES) {
+            lives++;
+            score += LIFE_SCORE_NORMAL;
+            addBurst(p.x, p.y, '#5CFF7A');
+            addFloater(p.x, p.y - 10, '+ЖИЗНЬ', '#5CFF7A');
+          } else {
+            score += LIFE_SCORE_FULL;
+            addBurst(p.x, p.y, '#5CFF7A');
+            addFloater(p.x, p.y - 10, '+' + LIFE_SCORE_FULL, '#5CFF7A');
+          }
+          sfxLifeUp();
+        }
+      }
+
+      if (p.t >= 1 && !p.dead) {
+        p.dead = true;
+        if (p.kind === 'bad') {
+          lives--;
+          screenShake = 0.35;
+          screenFlash = 0.35;
+          addFloater(p.x, p.y - 10, 'ПРОПУЩЕН БРАК!', '#ff5555');
+          sfxLife();
+          if (lives <= 0) { gameOver('lives'); }
+        }
+      }
+    }
+
+    // particles
+    for (var j = particles.length - 1; j >= 0; j--) {
+      var pt = particles[j];
+      pt.age += dt;
+      if (pt.age >= pt.life) { particles.splice(j, 1); continue; }
+      pt.x += pt.vx * dt; pt.y += pt.vy * dt;
+      pt.vx *= 0.92; pt.vy *= 0.92;
+    }
+    for (var k = floaters.length - 1; k >= 0; k--) {
+      var fl = floaters[k];
+      fl.age += dt;
+      if (fl.age >= fl.life) { floaters.splice(k, 1); continue; }
+      fl.y -= 22 * dt;
+    }
+
+    if (screenShake > 0) screenShake = Math.max(0, screenShake - dt);
+    if (screenFlash > 0) screenFlash = Math.max(0, screenFlash - dt);
+
+    spaceEdge = false;
+  }
+
+  // ---------- drawing ----------
+  function drawPlayer() {
+    if (assetsLoaded < TOTAL_ASSETS) return;
+    var spriteCanvas, flip = false;
+    if (player.facing === 'up') {
+      spriteCanvas = backImg;
+    } else if (player.facing === 'left') {
+      spriteCanvas = walkImgs[player.walkFrame];
+    } else if (player.facing === 'right') {
+      spriteCanvas = walkImgs[player.walkFrame];
+      flip = true;
+    } else {
+      spriteCanvas = idleImgs[player.idleFrame];
+    }
+
+    var dw = PLAYER_W, dh = PLAYER_H;
+    var dx = player.x - dw / 2, dy = player.y - dh;
+
+    ctx.save();
+    // soft shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(player.x, player.y - 4, dw * 0.36, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (flip) {
+      ctx.translate(player.x, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(spriteCanvas, -dw / 2, dy, dw, dh);
+    } else {
+      ctx.drawImage(spriteCanvas, dx, dy, dw, dh);
+    }
+    ctx.restore();
+  }
+
+  function drawPots() {
+    for (var i = 0; i < pots.length; i++) {
+      var p = pots[i];
+      if (p.dead) continue;
+      var glowPulse = 0.45 + Math.sin(elapsed * 8 + i) * 0.2;
+      var glowColor = p.kind === 'bad' ? '255,50,50' : (p.kind === 'life' ? '80,255,120' : null);
+
+      if (glowColor) {
+        var g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, 32);
+        g.addColorStop(0, 'rgba(' + glowColor + ',' + (0.55 * glowPulse + 0.15) + ')');
+        g.addColorStop(1, 'rgba(' + glowColor + ',0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 32, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      var src = partImg;
+      if (p.kind === 'bad' && partBadCanvas) src = partBadCanvas;
+      else if (p.kind === 'life' && partLifeCanvas) src = partLifeCanvas;
+      if (assetsLoaded >= TOTAL_ASSETS) {
+        ctx.drawImage(src, p.x - PART_W / 2, p.y - PART_H / 2, PART_W, PART_H);
+      }
+    }
+  }
+
+  function drawEndMarkers() {
+    for (var i = 0; i < END_POINTS.length; i++) {
+      var e = END_POINTS[i];
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = '#ffe082';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(e.x, e.y + 14, 26, 9, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      var a = 1 - p.age / p.life;
+      ctx.fillStyle = p.color;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFloaters() {
+    ctx.textAlign = 'center';
+    for (var i = 0; i < floaters.length; i++) {
+      var f = floaters[i];
+      var a = 1 - f.age / f.life;
+      ctx.globalAlpha = Math.max(0, a);
+      ctx.font = 'bold 16px "Courier New", monospace';
+      ctx.fillStyle = '#000';
+      ctx.fillText(f.text, f.x + 1, f.y + 1);
+      ctx.fillStyle = f.color;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+  }
+
+  function pixelText(text, x, y, size, color, align) {
+    ctx.font = 'bold ' + size + 'px "Courier New", monospace';
+    ctx.textAlign = align || 'left';
+    ctx.fillStyle = '#000';
+    ctx.fillText(text, x + 2, y + 2);
+    ctx.fillStyle = color;
+    ctx.fillText(text, x, y);
+  }
+
+  function drawHeart(x, y, filled) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = filled ? '#ff4d4d' : 'rgba(255,255,255,0.15)';
+    var s = 3;
+    var px = [
+      [1,0],[2,0],[4,0],[5,0],
+      [0,1],[1,1],[2,1],[3,1],[4,1],[5,1],[6,1],
+      [0,2],[1,2],[2,2],[3,2],[4,2],[5,2],[6,2],
+      [1,3],[2,3],[3,3],[4,3],[5,3],
+      [2,4],[3,4],[4,4],
+      [3,5]
+    ];
+    for (var i = 0; i < px.length; i++) {
+      ctx.fillRect(px[i][0] * s, px[i][1] * s, s, s);
+    }
+    ctx.restore();
+  }
+
+  function gradeInfo(percent) {
+    if (percent >= 80) return { text: 'ОТЛИЧНАЯ СМЕНА — ПРЕМИЯ!', color: '#7CFC6E' };
+    if (percent >= 50) return { text: 'СМЕНА ПРИНЯТА, БЕЗ ПРЕМИИ', color: '#ffe082' };
+    return { text: 'СМЕНА ПРОВАЛЕНА — БЕЗ ПРЕМИИ', color: '#ff5555' };
+  }
+
+  function formatTime(sec) {
+    sec = Math.max(0, Math.ceil(sec));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function drawUI() {
+    pixelText('ОЧКИ: ' + score, 18, 30, 20, '#ffe082');
+    pixelText('РЕКОРД: ' + highScore, 18, 54, 13, '#9fd3ff');
+    pixelText(LEVELS[level].label + '/' + LEVELS.length + '  ' + formatTime(levelTimer), 18, 74, 13, '#c9c9c9');
+    for (var i = 0; i < MAX_LIVES; i++) {
+      drawHeart(W - 30 - i * 26, 16, i < lives);
+    }
+  }
+
+  function drawOverlayBox(title, lines) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,8,4,0.72)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    pixelText(title, W / 2, H / 2 - 90, 34, '#ffd85e', 'center');
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i];
+      var txt = typeof ln === 'string' ? ln : ln.text;
+      var col = typeof ln === 'string' ? '#ffffff' : ln.color;
+      pixelText(txt, W / 2, H / 2 - 30 + i * 30, 16, col, 'center');
+    }
+    ctx.restore();
+  }
+
+  function drawLevelBanner() {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10,8,4,0.6)';
+    ctx.fillRect(0, H / 2 - 55, W, 110);
+    ctx.textAlign = 'center';
+    pixelText(LEVELS[level - 1].label + ' ПРОЙДЕН!', W / 2, H / 2 - 8, 28, '#ffd85e', 'center');
+    pixelText('Далее: ' + LEVELS[level].label, W / 2, H / 2 + 26, 16, '#ffffff', 'center');
+    ctx.restore();
+  }
+
+  function render() {
+    ctx.save();
+    if (screenShake > 0) {
+      var sh = screenShake * 8;
+      ctx.translate((Math.random() - 0.5) * sh, (Math.random() - 0.5) * sh);
+    }
+
+    if (assetsLoaded >= TOTAL_ASSETS && bgImg.complete) {
+      ctx.drawImage(bgImg, 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#1b1f2a';
+      ctx.fillRect(0, 0, W, H);
+      pixelText('ЗАГРУЗКА...', W / 2, H / 2, 22, '#ffffff', 'center');
+    }
+
+    if (state !== STATE_START) {
+      drawEndMarkers();
+      drawPots();
+      drawPlayer();
+      drawParticles();
+      drawFloaters();
+    }
+
+    ctx.restore();
+
+    if (screenFlash > 0) {
+      ctx.fillStyle = 'rgba(255,0,0,' + (screenFlash * 0.5) + ')';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    if (state === STATE_PLAY) {
+      drawUI();
+    } else if (state === STATE_LEVELUP) {
+      drawUI();
+      drawLevelBanner();
+    } else if (state === STATE_START) {
+      drawOverlayBox('СОБЕРИ ГОРШОЧКИ', [
+        'Стрелки ←↑→↓ — движение по краю конвейера',
+        'Хорошие горшочки ловятся сами',
+        'Красные (бракованные) — лови ПРОБЕЛОМ',
+        'Зелёные — доп. жизнь (или очки, если жизни полны)',
+        'Пропустишь брак — потеряешь жизнь. 3 уровня — это смена',
+        '',
+        'ENTER / ПРОБЕЛ — начать игру'
+      ]);
+    } else if (state === STATE_OVER) {
+      var grade = gradeInfo(finalPercent);
+      var title = gameOverReason === 'completed' ? 'СМЕНА ЗАВЕРШЕНА' : 'СМЕНА СОРВАНА';
+      drawOverlayBox(title, [
+        'Очки: ' + score + ' из ' + finalMaxScore + ' (' + finalPercent + '%)',
+        'Рекорд: ' + highScore,
+        { text: grade.text, color: grade.color },
+        '',
+        'ENTER / ПРОБЕЛ — играть снова'
+      ]);
+    }
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
