@@ -83,30 +83,30 @@
   @media (pointer: coarse) {
     .touch-controls { display: block; }
   }
-  .dpad {
+  .joystick {
     position: fixed;
-    left: max(16px, env(safe-area-inset-left));
-    bottom: max(16px, env(safe-area-inset-bottom));
-    width: 168px; height: 168px;
-  }
-  .dpad button {
-    position: absolute;
-    width: 56px; height: 56px;
-    border-radius: 14px;
-    border: 2px solid rgba(255,255,255,.4);
-    background: rgba(20,20,24,.55);
-    color: #ffe082;
-    font-size: 22px;
+    left: max(24px, env(safe-area-inset-left));
+    bottom: max(24px, env(safe-area-inset-bottom));
+    width: 130px; height: 130px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.35);
+    background: rgba(20,20,24,.45);
     pointer-events: auto;
     touch-action: none;
     -webkit-user-select: none; user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
-  .dpad button:active { background: rgba(255,224,130,.4); }
-  .dpad .up    { left: 56px; top: 0; }
-  .dpad .down  { left: 56px; top: 112px; }
-  .dpad .left  { left: 0;    top: 56px; }
-  .dpad .right { left: 112px; top: 56px; }
+  .joystick-knob {
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 58px; height: 58px;
+    margin-left: -29px; margin-top: -29px;
+    border-radius: 50%;
+    background: rgba(255,224,130,.55);
+    border: 2px solid rgba(255,255,255,.55);
+    pointer-events: none;
+  }
+  .joystick.active .joystick-knob { background: rgba(255,224,130,.8); }
 
   .catch-btn {
     position: fixed;
@@ -140,11 +140,8 @@
   </div>
 
   <div class="touch-controls">
-    <div class="dpad">
-      <button type="button" class="up" data-key="up">&#9650;</button>
-      <button type="button" class="down" data-key="down">&#9660;</button>
-      <button type="button" class="left" data-key="left">&#9664;</button>
-      <button type="button" class="right" data-key="right">&#9654;</button>
+    <div class="joystick" id="joystick">
+      <div class="joystick-knob" id="joystickKnob"></div>
     </div>
     <button type="button" class="catch-btn" id="catchBtn">ЛОВИ<br>БРАК</button>
   </div>
@@ -415,13 +412,44 @@
     el.addEventListener('pointercancel', function () { onUp(); }, { passive: false });
     el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   }
-  var dpadButtons = document.querySelectorAll('.dpad button');
-  for (var dbi = 0; dbi < dpadButtons.length; dbi++) {
-    (function (btn) {
-      var key = btn.getAttribute('data-key');
-      bindHold(btn, function () { keys[key] = true; }, function () { keys[key] = false; });
-    })(dpadButtons[dbi]);
+
+  // One-finger analog joystick: drag the knob away from the base's center
+  // and the character moves in that direction, faster the further out you
+  // drag (clamped to the base's radius).
+  var joy = { active: false, x: 0, y: 0, pointerId: null };
+  var joyEl = document.getElementById('joystick');
+  var joyKnobEl = document.getElementById('joystickKnob');
+  var JOY_RADIUS = 46;
+  function joyUpdate(e) {
+    var rect = joyEl.getBoundingClientRect();
+    var dx = e.clientX - (rect.left + rect.width / 2);
+    var dy = e.clientY - (rect.top + rect.height / 2);
+    var dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > JOY_RADIUS) { dx = dx / dist * JOY_RADIUS; dy = dy / dist * JOY_RADIUS; }
+    joy.x = dx / JOY_RADIUS;
+    joy.y = dy / JOY_RADIUS;
+    joyKnobEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
   }
+  function joyReset() {
+    joy.active = false; joy.x = 0; joy.y = 0; joy.pointerId = null;
+    joyEl.classList.remove('active');
+    joyKnobEl.style.transform = 'translate(0,0)';
+  }
+  joyEl.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    joy.active = true; joy.pointerId = e.pointerId;
+    joyEl.classList.add('active');
+    try { joyEl.setPointerCapture(e.pointerId); } catch (err) {}
+    joyUpdate(e);
+  }, { passive: false });
+  joyEl.addEventListener('pointermove', function (e) {
+    if (!joy.active || e.pointerId !== joy.pointerId) return;
+    e.preventDefault();
+    joyUpdate(e);
+  }, { passive: false });
+  joyEl.addEventListener('pointerup', function (e) { e.preventDefault(); joyReset(); }, { passive: false });
+  joyEl.addEventListener('pointercancel', function () { joyReset(); }, { passive: false });
+
   var catchBtn = document.getElementById('catchBtn');
   bindHold(catchBtn, function () {
     if (!keys.space) spaceEdge = true;
@@ -542,10 +570,17 @@
     if (keys.right) dx += 1;
     if (keys.up) dy -= 1;
     if (keys.down) dy += 1;
+    if (joy.active) {
+      var joyDead = 0.15;
+      if (Math.abs(joy.x) > joyDead) dx += joy.x;
+      if (Math.abs(joy.y) > joyDead) dy += joy.y;
+    }
 
     if (dx !== 0 || dy !== 0) {
+      // Cap combined speed to 1 (keyboard always hits this since its inputs
+      // are -1/0/1), but let the joystick move slower the less it's pushed.
       var len = Math.sqrt(dx * dx + dy * dy);
-      dx /= len; dy /= len;
+      if (len > 1) { dx /= len; dy /= len; }
       var stepX = dx * PLAYER_SPEED * dt;
       var stepY = dy * PLAYER_SPEED * dt;
 
