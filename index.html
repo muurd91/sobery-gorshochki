@@ -127,6 +127,27 @@
     -webkit-tap-highlight-color: transparent;
   }
   .catch-btn:active { background: rgba(255,70,70,.8); }
+
+  /* Pause button - always visible (desktop mouse and touch both need it),
+     unlike the joystick/catch button which only show up on touchscreens. */
+  .pause-btn {
+    position: fixed;
+    top: max(14px, env(safe-area-inset-top));
+    right: max(14px, env(safe-area-inset-right));
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    border: 2px solid rgba(255,255,255,.4);
+    background: rgba(20,20,24,.55);
+    color: #ffe082;
+    font-size: 16px;
+    line-height: 1;
+    z-index: 60;
+    pointer-events: auto;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .pause-btn:active { background: rgba(255,224,130,.4); }
 </style>
 </head>
 <body>
@@ -138,6 +159,8 @@
       <div class="fx-layer glass-shine"></div>
     </div>
   </div>
+
+  <button type="button" class="pause-btn" id="pauseBtn" aria-label="Пауза">&#10074;&#10074;</button>
 
   <div class="touch-controls">
     <div class="joystick" id="joystick">
@@ -253,6 +276,74 @@
   function sfxStart()  { beep(500, 0.08, 'square', 0.12); beep(700, 0.08, 'square', 0.12, 0.08); beep(900, 0.12, 'square', 0.12, 0.16); }
   function sfxLifeUp() { beep(520, 0.09, 'triangle', 0.14); beep(660, 0.09, 'triangle', 0.14, 0.08); beep(880, 0.14, 'triangle', 0.16, 0.16); }
   function sfxLevelUp(){ beep(440, 0.12, 'square', 0.13); beep(660, 0.12, 'square', 0.13, 0.10); beep(880, 0.20, 'square', 0.15, 0.20); }
+  function sfxPause()  { beep(392, 0.08, 'square', 0.09); beep(294, 0.10, 'square', 0.08, 0.06); }
+  function sfxResume() { beep(294, 0.08, 'square', 0.09); beep(392, 0.10, 'square', 0.08, 0.06); }
+
+  // ---------- background music (procedural, looping, quiet) ----------
+  var NOTE_FREQ = {
+    C3: 130.81, D3: 146.83, E3: 164.81, F3: 174.61, G3: 196.00, A3: 220.00, B3: 246.94,
+    C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88,
+    C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00
+  };
+  // A cheerful, bouncy little loop (4s) - light enough to sit under the
+  // sound effects rather than compete with them.
+  var MUSIC_LEAD = [
+    ['C5', 0.25], ['E5', 0.25], ['G5', 0.25], ['E5', 0.25],
+    ['F5', 0.25], ['A5', 0.25], ['G5', 0.25], ['E5', 0.25],
+    ['D5', 0.25], ['F5', 0.25], ['A5', 0.25], ['F5', 0.25],
+    ['G5', 0.25], ['E5', 0.25], ['D5', 0.25], ['C5', 0.25]
+  ];
+  var MUSIC_BASS = [
+    ['C3', 0.5], ['G3', 0.5],
+    ['A3', 0.5], ['E3', 0.5],
+    ['F3', 0.5], ['C3', 0.5],
+    ['G3', 0.5], ['G3', 0.5]
+  ];
+  var musicEnabled = false, musicTimerId = null;
+  var musicLeadIdx = 0, musicLeadNext = 0;
+  var musicBassIdx = 0, musicBassNext = 0;
+
+  function scheduleTone(freq, time, dur, type, vol) {
+    var ac = audio();
+    if (!ac) return;
+    var osc = ac.createOscillator();
+    var gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, time);
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(vol, time + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + dur * 0.92);
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start(time); osc.stop(time + dur);
+  }
+  function musicTick() {
+    var ac = audio();
+    if (!ac || !musicEnabled) return;
+    var horizon = ac.currentTime + 0.6;
+    while (musicLeadNext < horizon) {
+      var n = MUSIC_LEAD[musicLeadIdx % MUSIC_LEAD.length];
+      scheduleTone(NOTE_FREQ[n[0]], musicLeadNext, n[1], 'square', 0.045);
+      musicLeadNext += n[1];
+      musicLeadIdx++;
+    }
+    while (musicBassNext < horizon) {
+      var b = MUSIC_BASS[musicBassIdx % MUSIC_BASS.length];
+      scheduleTone(NOTE_FREQ[b[0]], musicBassNext, b[1], 'triangle', 0.04);
+      musicBassNext += b[1];
+      musicBassIdx++;
+    }
+    musicTimerId = setTimeout(musicTick, 150);
+  }
+  function ensureMusicStarted() {
+    var ac = audio();
+    if (!ac) return;
+    if (ac.state === 'suspended') { try { ac.resume(); } catch (e) {} }
+    if (musicEnabled) return;
+    musicEnabled = true;
+    musicLeadIdx = 0; musicLeadNext = ac.currentTime + 0.1;
+    musicBassIdx = 0; musicBassNext = ac.currentTime + 0.1;
+    musicTick();
+  }
 
   // ---------- constants ----------
   var W = 900, H = 600;
@@ -336,7 +427,7 @@
   ];
 
   // ---------- state ----------
-  var STATE_START = 'start', STATE_PLAY = 'play', STATE_LEVELUP = 'levelup', STATE_OVER = 'over';
+  var STATE_START = 'start', STATE_PLAY = 'play', STATE_LEVELUP = 'levelup', STATE_OVER = 'over', STATE_PAUSED = 'paused';
   var state = STATE_START;
 
   var score = 0, lives = 3, elapsed = 0;
@@ -374,6 +465,7 @@
 
   window.addEventListener('keydown', function (e) {
     var k = e.key;
+    ensureMusicStarted();
     if (k === 'ArrowUp' || k === 'ArrowDown' || k === 'ArrowLeft' || k === 'ArrowRight' || k === ' ' || k === 'Spacebar' || k === 'Enter') {
       e.preventDefault();
     }
@@ -389,6 +481,9 @@
     if (k === 'Enter' || k === ' ' || k === 'Spacebar') {
       if (state === STATE_START) { startGame(); }
       else if (state === STATE_OVER) { startGame(); }
+    }
+    if (k === 'p' || k === 'P' || k === 'Escape' || k === 'Pause') {
+      togglePause();
     }
   }, { passive: false });
 
@@ -437,6 +532,7 @@
   }
   joyEl.addEventListener('pointerdown', function (e) {
     e.preventDefault();
+    ensureMusicStarted();
     joy.active = true; joy.pointerId = e.pointerId;
     joyEl.classList.add('active');
     try { joyEl.setPointerCapture(e.pointerId); } catch (err) {}
@@ -452,10 +548,19 @@
 
   var catchBtn = document.getElementById('catchBtn');
   bindHold(catchBtn, function () {
+    ensureMusicStarted();
     if (!keys.space) spaceEdge = true;
     keys.space = true;
     if (state === STATE_START || state === STATE_OVER) startGame();
   }, function () { keys.space = false; });
+
+  var pauseBtn = document.getElementById('pauseBtn');
+  pauseBtn.addEventListener('pointerdown', function (e) {
+    e.preventDefault();
+    ensureMusicStarted();
+    togglePause();
+  }, { passive: false });
+  pauseBtn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   function startGame() {
     score = 0; lives = MAX_LIVES; elapsed = 0;
@@ -483,6 +588,17 @@
       try { localStorage.setItem('gorshochki_highscore', String(highScore)); } catch (e) {}
     }
     sfxOver();
+  }
+
+  function togglePause() {
+    if (state === STATE_PLAY) {
+      state = STATE_PAUSED;
+      spaceEdge = false;
+      sfxPause();
+    } else if (state === STATE_PAUSED) {
+      state = STATE_PLAY;
+      sfxResume();
+    }
   }
 
   // ---------- spawning ----------
@@ -913,6 +1029,13 @@
     } else if (state === STATE_LEVELUP) {
       drawUI();
       drawLevelBanner();
+    } else if (state === STATE_PAUSED) {
+      drawUI();
+      drawOverlayBox('ПАУЗА', [
+        'Игра приостановлена',
+        '',
+        'P / ESC или кнопка ❚❚ — продолжить'
+      ]);
     } else if (state === STATE_START) {
       drawOverlayBox('ИСТОКИ ПРОИЗВОДСТВА', [
         'Стрелки ←↑→↓ — движение по краю конвейера',
