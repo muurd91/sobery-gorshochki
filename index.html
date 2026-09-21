@@ -285,30 +285,21 @@
     C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.00, A4: 440.00, B4: 493.88,
     C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.00
   };
-  // One continuous 8s phrase (not two loops stitched together): it opens
-  // with a motif, sequences it a step higher without fully resolving
-  // midway (so it keeps moving forward instead of sounding like it
-  // "restarts"), then descends through a single unbroken line to land
-  // back on the tonic exactly at the loop point.
+  // A calm little tune over a classic four-chord loop (C - G - Am - F,
+  // 2s per chord = 8s total). Mixed note lengths instead of a wall of
+  // identical eighths, and a soft "oom-pah" bass under it, so it reads as
+  // one relaxed melody rather than a burst of uniform blips.
   var MUSIC_LEAD = [
-    ['C5', 0.25], ['E5', 0.25], ['G5', 0.25], ['E5', 0.25],
-    ['F5', 0.25], ['A5', 0.25], ['G5', 0.25], ['E5', 0.25],
-    ['D5', 0.25], ['F5', 0.25], ['A5', 0.25], ['F5', 0.25],
-    ['G5', 0.25], ['B4', 0.25], ['A5', 0.25], ['F5', 0.25],
-    ['E5', 0.25], ['G5', 0.25], ['F5', 0.25], ['D5', 0.25],
-    ['C5', 0.25], ['E5', 0.25], ['D5', 0.25], ['B4', 0.25],
-    ['C5', 0.25], ['D5', 0.25], ['E5', 0.25], ['D5', 0.25],
-    ['C5', 0.25], ['D5', 0.25], ['B4', 0.25], ['C5', 0.25]
+    ['E4', 0.5], ['G4', 0.5], ['E4', 0.25], ['D4', 0.25], ['C4', 0.5],           // C
+    ['D4', 0.5], ['G4', 0.5], ['F4', 0.25], ['E4', 0.25], ['D4', 0.5],           // G
+    ['C5', 0.5], ['A4', 0.5], ['E4', 0.25], ['F4', 0.25], ['E4', 0.5],           // Am
+    ['F4', 0.5], ['E4', 0.25], ['D4', 0.25], ['E4', 0.25], ['D4', 0.25], ['C4', 0.5]  // F -> back to C
   ];
   var MUSIC_BASS = [
-    ['C3', 0.5], ['A3', 0.5],
-    ['F3', 0.5], ['G3', 0.5],
-    ['C3', 0.5], ['A3', 0.5],
-    ['F3', 0.5], ['G3', 0.5],
-    ['E3', 0.5], ['F3', 0.5],
-    ['D3', 0.5], ['G3', 0.5],
-    ['C3', 0.5], ['F3', 0.5],
-    ['G3', 0.5], ['C3', 0.5]
+    ['C3', 0.5], ['G3', 0.5], ['C3', 0.5], ['G3', 0.5],   // C
+    ['G3', 0.5], ['D4', 0.5], ['G3', 0.5], ['D4', 0.5],   // G
+    ['A3', 0.5], ['E4', 0.5], ['A3', 0.5], ['E4', 0.5],   // Am
+    ['F3', 0.5], ['C4', 0.5], ['F3', 0.5], ['C4', 0.5]    // F
   ];
   var musicEnabled = false, musicTimerId = null;
   var musicLeadIdx = 0, musicLeadNext = 0;
@@ -333,13 +324,13 @@
     var horizon = ac.currentTime + 0.6;
     while (musicLeadNext < horizon) {
       var n = MUSIC_LEAD[musicLeadIdx % MUSIC_LEAD.length];
-      scheduleTone(NOTE_FREQ[n[0]], musicLeadNext, n[1], 'square', 0.028);
+      scheduleTone(NOTE_FREQ[n[0]], musicLeadNext, n[1], 'triangle', 0.045);
       musicLeadNext += n[1];
       musicLeadIdx++;
     }
     while (musicBassNext < horizon) {
       var b = MUSIC_BASS[musicBassIdx % MUSIC_BASS.length];
-      scheduleTone(NOTE_FREQ[b[0]], musicBassNext, b[1], 'triangle', 0.025);
+      scheduleTone(NOTE_FREQ[b[0]], musicBassNext, b[1], 'sine', 0.05);
       musicBassNext += b[1];
       musicBassIdx++;
     }
